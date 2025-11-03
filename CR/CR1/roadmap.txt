@@ -1,0 +1,18 @@
+Etape 1 :
+
+Ajouter détection + genre + age (?)
+
+Etape 2 :
+
+A partir d'une détection générer le visage de face (mug shot commissairiat)
+
+Etape 3 :
+
+Faire un GAN pour détecter si l'image a été générer ou réelle 
+
+Etape 4 : 
+
+Entraîner le générateur pour tromper le GAN
+
+
+Contexte : Détecter les visages depuis des caméras de vidéo surveillance
