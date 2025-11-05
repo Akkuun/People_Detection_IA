@@ -1,13 +1,44 @@
 from ultralytics import YOLO
 import cv2
 import numpy as np
+import sys
+
+print("🚀 Démarrage de l'application de détection...")
 
 # Load model once
-model = YOLO("yolov8n.pt")
+try:
+    print("📥 Chargement du modèle YOLO...")
+    model = YOLO("yolov8n.pt")
+    print("✅ Modèle YOLO chargé avec succès")
+except Exception as e:
+    print(f"❌ Erreur lors du chargement du modèle: {e}")
+    sys.exit(1)
 
 # Open webcam
+print("📹 Tentative d'ouverture de la caméra...")
 cap = cv2.VideoCapture(0)
+
+if not cap.isOpened():
+    print("❌ Erreur: Impossible d'ouvrir la caméra!")
+    print("💡 Vérifications à faire:")
+    print("   - La caméra est-elle connectée?")
+    print("   - Une autre application utilise-t-elle la caméra?")
+    print("   - Permissions d'accès à la caméra?")
+    sys.exit(1)
+
+print("✅ Caméra ouverte avec succès")
+
+# Test read frame
+ret, test_frame = cap.read()
+if not ret:
+    print("❌ Erreur: Impossible de lire une image depuis la caméra!")
+    cap.release()
+    sys.exit(1)
+
+print(f"✅ Image test lue: {test_frame.shape}")
+
 cv2.namedWindow("Détection webcam", cv2.WINDOW_NORMAL)
+print("✅ Fenêtre créée")
 
 
 def draw_boxes_opencv(frame, results):
@@ -66,32 +97,63 @@ def draw_boxes_opencv(frame, results):
         cv2.putText(frame, label, (x1, y1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
 
 
+print("🎥 Démarrage de la boucle de détection...")
+print("💡 Instructions:")
+print("   - Appuyez sur 'q' ou 'ESC' pour quitter")
+print("   - Appuyez sur 's' pour capturer une image")
+
+frame_count = 0
+
 try:
     while True:
         ret, frame = cap.read()
         if not ret:
+            print("❌ Erreur: Impossible de lire l'image de la caméra")
             break
 
-        # Run model inference (do not call any show/plot helpers that may open windows)
-        results = model(frame)
+        frame_count += 1
+        if frame_count % 30 == 0:  # Print every 30 frames
+            print(f"📊 Frame #{frame_count} traité")
 
-        # Draw boxes on a copy of the frame
-        annotated = frame.copy()
+        # Run model inference (do not call any show/plot helpers that may open windows)
         try:
-            draw_boxes_opencv(annotated, results)
-        except Exception:
-            # as a last resort fallback to the model's plot if available
+            results = model(frame)
+        except Exception as e:
+            print(f"❌ Erreur lors de l'inférence: {e}")
+            annotated = frame
+        else:
+            # Draw boxes on a copy of the frame
+            annotated = frame.copy()
             try:
-                annotated = results[0].plot()
-            except Exception:
-                # If even that fails, just show the original frame
-                annotated = frame
+                draw_boxes_opencv(annotated, results)
+            except Exception as e:
+                print(f"⚠️ Erreur lors du dessin des boîtes: {e}")
+                # as a last resort fallback to the model's plot if available
+                try:
+                    annotated = results[0].plot()
+                except Exception:
+                    # If even that fails, just show the original frame
+                    annotated = frame
 
         cv2.imshow("Détection webcam", annotated)
 
-        # ESC pour quitter
-        if cv2.waitKey(1) & 0xFF == 27:
+        # Check for key press
+        key = cv2.waitKey(1) & 0xFF
+        if key == 27 or key == ord('q'):  # ESC or 'q' to quit
+            print("🛑 Arrêt demandé par l'utilisateur")
             break
+        elif key == ord('s'):  # 's' to save screenshot
+            cv2.imwrite(f'detection_screenshot_{frame_count}.jpg', annotated)
+            print(f"📸 Screenshot sauvegardé: detection_screenshot_{frame_count}.jpg")
+
+except KeyboardInterrupt:
+    print("🛑 Interruption clavier (Ctrl+C)")
+except Exception as e:
+    print(f"❌ Erreur inattendue: {e}")
+    import traceback
+    traceback.print_exc()
 finally:
+    print("🧹 Nettoyage des ressources...")
     cap.release()
     cv2.destroyAllWindows()
+    print("✅ Application fermée proprement")
