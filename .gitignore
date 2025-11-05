@@ -1,0 +1,48 @@
+# Fichiers de compilation
+*.o
+*.obj
+*.exe
+*.out
+*.a
+*.so
+*.dll
+
+# Dossiers de build
+build/
+cmake-build-*/
+tf-env/
+
+# Fichiers temporaires
+*.log
+*.tmp
+*.bak
+
+# Fichiers Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Fichiers de données
+*.csv
+*.tsv
+*.h5
+
+# Fichiers Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Fichiers IDE (Visual Studio Code, CLion, etc.)
+.vscode/
+.idea/
+*.user
+*.suo
+*.vcxproj*
+
+# Environnements virtuels Python
+venv/
+.env/
+.envrc
+
+# Fichiers système
+.DS_Store
+Thumbs.db
