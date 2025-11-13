@@ -84,14 +84,8 @@ fi
 export QT_QPA_PLATFORM=xcb
 export DISPLAY=${DISPLAY:-:0}
 
-# Lancer le projet
-print_info "Lancement du projet de détection de personnes..."
-print_info "Appuyez sur 'q' dans la fenêtre de la caméra pour arrêter le programme"
-print_warning "Si la caméra ne s'ouvre pas, vérifiez qu'aucune autre application ne l'utilise"
-
+# Lancer le script principal
 cd "$CODE_DIR"
-print_info "Lancement avec débogage activé..."
-python3 -u testProjet.py 2>&1 | tee /tmp/detection_debug.log
-print_info "Log sauvegardé dans /tmp/detection_debug.log"
+python3 testProjet.py
 
 print_success "Projet terminé avec succès"
