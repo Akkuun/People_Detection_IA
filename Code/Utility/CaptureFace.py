@@ -76,35 +76,118 @@ class CaptureFace:
         return face
     
     def classify_orientation(self, face_img):
-        """Classifier si c'est face ou profil"""
+        """Classifier si c'est face ou profil avec méthode améliorée"""
         if face_img is None:
             return "unknown"
             
         gray = cv2.cvtColor(face_img, cv2.COLOR_BGR2GRAY)
+        height, width = gray.shape
         
-        # Détecter les yeux pour déterminer l'orientation
-        eyes = self.eye_cascade.detectMultiScale(gray, 1.1, 3, minSize=(10, 10))
+        # Score pour chaque orientation
+        face_score = 0
+        profile_score = 0
         
-        if len(eyes) >= 2:
-            return "face"  # Deux yeux visibles = face
-        elif len(eyes) == 1:
-            return "profile"  # Un œil visible = profil
-        else:
-            # Fallback: analyser la symétrie de l'image
-            left_half = gray[:, :gray.shape[1]//2]
-            right_half = cv2.flip(gray[:, gray.shape[1]//2:], 1)
+        # 1. Détection des yeux avec différents paramètres
+        eyes_strict = self.eye_cascade.detectMultiScale(gray, 1.1, 5, minSize=(10, 10))
+        eyes_relaxed = self.eye_cascade.detectMultiScale(gray, 1.05, 2, minSize=(5, 5))
+        
+        # 2. Détection face frontale et profil
+        faces = self.face_cascade.detectMultiScale(gray, 1.1, 3, minSize=(20, 20))
+        profiles = self.profile_cascade.detectMultiScale(gray, 1.1, 3, minSize=(20, 20))
+        
+        # Profil inversé
+        gray_flipped = cv2.flip(gray, 1)
+        profiles_flipped = self.profile_cascade.detectMultiScale(gray_flipped, 1.1, 3, minSize=(20, 20))
+        
+        # 3. Scoring basé sur les détections
+        if len(faces) > 0:
+            face_score += 3
+        if len(profiles) > 0 or len(profiles_flipped) > 0:
+            profile_score += 3
             
-            # Redimensionner pour comparer
-            if left_half.shape != right_half.shape:
-                min_width = min(left_half.shape[1], right_half.shape[1])
-                left_half = left_half[:, :min_width]
-                right_half = right_half[:, :min_width]
+        # 4. Analyse des yeux
+        if len(eyes_strict) >= 2:
+            # Vérifier l'alignement horizontal des yeux
+            eye_centers = [(x + w//2, y + h//2) for x, y, w, h in eyes_strict]
+            if len(eye_centers) >= 2:
+                # Calculer la différence de hauteur entre les yeux
+                y_diffs = [abs(eye_centers[i][1] - eye_centers[j][1]) 
+                          for i in range(len(eye_centers)) 
+                          for j in range(i+1, len(eye_centers))]
+                min_y_diff = min(y_diffs) if y_diffs else float('inf')
+                
+                if min_y_diff < height * 0.15:  # Yeux alignés = face
+                    face_score += 4
+                else:
+                    profile_score += 1
+                    
+            face_score += 2
+        elif len(eyes_relaxed) >= 2:
+            face_score += 1
+        elif len(eyes_strict) == 1 or len(eyes_relaxed) == 1:
+            profile_score += 2
             
-            # Calculer la différence
-            diff = cv2.absdiff(left_half, right_half)
+        # 5. Analyse de symétrie améliorée
+        left_half = gray[:, :width//2]
+        right_half = gray[:, width//2:]
+        
+        if right_half.shape[1] != left_half.shape[1]:
+            min_width = min(left_half.shape[1], right_half.shape[1])
+            left_half = left_half[:, :min_width]
+            right_half = right_half[:, :min_width]
+        
+        right_half_flipped = cv2.flip(right_half, 1)
+        
+        # Utiliser la corrélation croisée normalisée
+        try:
+            correlation = cv2.matchTemplate(left_half, right_half_flipped, cv2.TM_CCOEFF_NORMED)[0][0]
+            
+            if correlation > 0.65:  # Haute symétrie
+                face_score += 2
+            elif correlation < 0.3:  # Faible symétrie
+                profile_score += 2
+        except:
+            # Fallback sur la différence absolue
+            diff = cv2.absdiff(left_half, right_half_flipped)
             symmetry_score = np.mean(diff)
             
-            return "face" if symmetry_score < 30 else "profile"
+            if symmetry_score < 25:
+                face_score += 1
+            elif symmetry_score > 45:
+                profile_score += 1
+        
+        # 6. Analyse de la distribution des gradients
+        sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+        
+        # Analyser la distribution des gradients verticaux
+        left_gradients = np.sum(np.abs(sobelx[:, :width//3]))
+        center_gradients = np.sum(np.abs(sobelx[:, width//3:2*width//3]))
+        right_gradients = np.sum(np.abs(sobelx[:, 2*width//3:]))
+        
+        total_gradients = left_gradients + center_gradients + right_gradients
+        if total_gradients > 0:
+            left_ratio = left_gradients / total_gradients
+            right_ratio = right_gradients / total_gradients
+            
+            # Pour un profil, les gradients sont concentrés sur un côté
+            if left_ratio > 0.6 or right_ratio > 0.6:
+                profile_score += 1
+            elif 0.2 < left_ratio < 0.4 and 0.2 < right_ratio < 0.4:
+                face_score += 1
+        
+        # 7. Décision finale avec seuils ajustés
+        if face_score > profile_score and face_score >= 2:
+            return "face"
+        elif profile_score > face_score and profile_score >= 2:
+            return "profile"
+        else:
+            # Fallback simple
+            if len(eyes_strict) >= 2:
+                return "face"
+            elif len(eyes_strict) == 1 or len(profiles) > 0 or len(profiles_flipped) > 0:
+                return "profile"
+            else:
+                return "unknown"
     
     def create_mugshot(self, face_img, size=resolution, enhance="minimal"):
         """Créer un mugshot avec options d'amélioration

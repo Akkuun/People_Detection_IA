@@ -84,7 +84,13 @@ fi
 export QT_QPA_PLATFORM=xcb
 export DISPLAY=${DISPLAY:-:0}
 
-# Lancer le script principal
+# Lancer le script principal avec le nouveau pipeline
+print_info "Nouveau pipeline de mugshots activé :"
+print_info "  - Détection automatique de l'orientation (face/profil)"
+print_info "  - Amélioration de la qualité d'image"
+print_info "  - Génération de vues frontales à partir de profils"
+echo ""
+
 cd "$CODE_DIR"
 python3 testProjet.py
 

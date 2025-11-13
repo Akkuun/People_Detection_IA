@@ -3,8 +3,10 @@ import cv2
 import numpy as np
 import sys
 import logging
+import time
 
 from Utility.CaptureFace import CaptureFace
+from Utility.MugshotPipeline import MugshotPipeline
 
 # Supprimer les logs verbeux de YOLO et ultralytics
 logging.getLogger('ultralytics').setLevel(logging.WARNING)
@@ -89,9 +91,11 @@ def draw_boxes_opencv(frame, results):
 print("   - Appuyez sur 'q' ou 'ESC' pour quitter")
 print("   - Appuyez sur 's' pour capturer une image")
 print("   - Appuyez sur 'm' pour générer les mugshots")
+print("   - Appuyez sur 'c' pour détecter et classifier les visages")
 
 frame_count = 0
 mugshot_generator = CaptureFace()
+mugshot_pipeline = MugshotPipeline()
 
 try:
     while True:
@@ -131,7 +135,7 @@ try:
         # si touche == S, on sauvegarde une image en JPG
         elif key == ord('s'): 
             cv2.imwrite(f'SavedImages/detection_screenshot_{frame_count}.jpg', annotated)
-            print(f"📸 Screenshot sauvegardé: detection_screenshot_{frame_count}.jpg")
+            print(f" Screenshot sauvegardé: detection_screenshot_{frame_count}.jpg")
         # si touche == M, on génère les mugshots
         elif key == ord('m'):
             if 'results' in locals() and results and len(results) > 0:
@@ -144,30 +148,80 @@ try:
                         clss = boxes.cls.cpu().numpy() if hasattr(boxes.cls, "cpu") else np.array(boxes.cls)
                         
                         mugshot_count = 0
+                        timestamp = int(time.time())
+                        
                         for i, (box, cls) in enumerate(zip(xyxy, clss)):
                             if int(cls) == 0:  # Personne détectée (classe 0 dans YOLO)
                                 x1, y1, x2, y2 = map(int, box)
                                 bbox = (x1, y1, x2-x1, y2-y1)
                                 
+                                # Extraire le visage
                                 face = mugshot_generator.extract_face_from_detection(frame, bbox)
                                 if face is not None:
-                                    mugshot, orientation = mugshot_generator.create_mugshot(face, enhance="none")
-                                    if mugshot is not None:
-                                        filename = f'SavedImages/mugshot_{orientation}_{frame_count}_person{i}.jpg'
-                                        cv2.imwrite(filename, mugshot)
+                                    # Utiliser le nouveau pipeline complet
+                                    processed_face, orientation = mugshot_pipeline.process_mugshot(face)
+                                    
+                                    if processed_face is not None:
+                                        filename = f'SavedImages/mugshot_{orientation}_{timestamp}_person{i}.jpg'
+                                        cv2.imwrite(filename, processed_face)
                                         mugshot_count += 1
                                         print(f"  📸 {orientation}: {filename}")
                         
                         if mugshot_count > 0:
-                            print(f"👤 {mugshot_count} mugshot(s) généré(s)")
+                            print(f"{mugshot_count} mugshot(s) généré(s) avec le pipeline complet")
                         else:
-                            print("❌ Aucune personne détectée pour générer des mugshots")
+                            print(" Aucune personne détectée pour générer des mugshots")
                     except Exception as e:
                         print(f"Erreur génération mugshot: {e}")
+                        import traceback
+                        traceback.print_exc()
                 else:
-                    print("❌ Aucune détection disponible")
+                    print(" Aucune détection disponible")
             else:
-                print("❌ Aucun résultat de détection disponible")
+                print(" Aucun résultat de détection disponible")
+        # si touche == C, on détecte et classifie les visages
+        elif key == ord('c'):
+            if 'results' in locals() and results and len(results) > 0:
+                res = results[0]
+                boxes = getattr(res, "boxes", None)
+                
+                if boxes is not None:
+                    try:
+                        xyxy = boxes.xyxy.cpu().numpy() if hasattr(boxes.xyxy, "cpu") else np.array(boxes.xyxy)
+                        clss = boxes.cls.cpu().numpy() if hasattr(boxes.cls, "cpu") else np.array(boxes.cls)
+                        
+                        face_count = 0
+                        timestamp = int(time.time())
+                        
+                        for i, (box, cls) in enumerate(zip(xyxy, clss)):
+                            if int(cls) == 0:  # Personne détectée (classe 0 dans YOLO)
+                                x1, y1, x2, y2 = map(int, box)
+                                bbox = (x1, y1, x2-x1, y2-y1)
+                                
+                                # Extraire le visage
+                                face = mugshot_generator.extract_face_from_detection(frame, bbox)
+                                if face is not None:
+                                    # Classifier l'orientation seulement
+                                    orientation = mugshot_generator.classify_orientation(face)
+                                    
+                                    # Sauvegarder l'image avec le nom de l'orientation détectée
+                                    filename = f'SavedImages/{orientation}_{timestamp}_person{i}.jpg'
+                                    cv2.imwrite(filename, face)
+                                    face_count += 1
+                                    print(f"  🔍 Détecté {orientation}: {filename}")
+                        
+                        if face_count > 0:
+                            print(f"{face_count} visage(s) détecté(s) et classifié(s)")
+                        else:
+                            print(" Aucune personne détectée pour la classification de visage")
+                    except Exception as e:
+                        print(f"Erreur détection visage: {e}")
+                        import traceback
+                        traceback.print_exc()
+                else:
+                    print(" Aucune détection disponible")
+            else:
+                print(" Aucun résultat de détection disponible")
 
 
 
