@@ -48,8 +48,11 @@ venv/
 .DS_Store
 Thumbs.db
 
-SavedImages/
 
 */__pycache__/
 
 Code/__pycache__
+
+*.jpg
+*.jpeg
+*.png

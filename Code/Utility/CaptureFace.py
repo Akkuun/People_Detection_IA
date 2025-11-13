@@ -120,16 +120,7 @@ class CaptureFace:
         
         # Classifier l'orientation
         orientation = self.classify_orientation(face_resized)
-        
+
         # Améliorer la qualité selon l'option choisie
-        if enhance == "none" or enhance == False:
-            return face_resized, orientation
-        elif enhance == "minimal":
-            face_enhanced = self.enhancer.enhance_face_minimal(face_resized)
-            return face_enhanced, orientation
-        elif enhance == "normal" or enhance == True:
-            face_enhanced = self.enhancer.enhance_face(face_resized)
-            return face_enhanced, orientation
-        else:
-            # Par défaut, pas d'amélioration
-            return face_resized, orientation
+        face_enhanced = self.enhancer.enhance_face(face_resized)
+        return face_enhanced, orientation

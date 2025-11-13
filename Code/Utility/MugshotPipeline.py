@@ -1,12 +1,10 @@
 import cv2
 import numpy as np
 from .ImageEnhancer import ImageEnhancer
-from .BackgroundRemover import BackgroundRemover
 
 class MugshotPipeline:
     def __init__(self):
         self.enhancer = ImageEnhancer()
-        self.bg_remover = BackgroundRemover()
         
     def classify_orientation(self, face_img):
         """Classifier si c'est face ou profil"""
@@ -26,7 +24,7 @@ class MugshotPipeline:
         else:
             return "unknown"
     
-    def process_mugshot(self, face_img, enhance=True, remove_bg=False):
+    def process_mugshot(self, face_img):
         """Pipeline complet de traitement"""
         if face_img is None:
             return None, "unknown"
@@ -35,11 +33,8 @@ class MugshotPipeline:
         orientation = self.classify_orientation(processed)
         
         # 1. Amélioration qualité
-        if enhance:
-            processed = self.enhancer.enhance_face(processed)
         
-        # 2. Suppression fond (optionnel)
-        if remove_bg:
-            processed = self.bg_remover.remove_background(processed)
+        processed = self.enhancer.enhance_face(processed)
+        
             
         return processed, orientation
