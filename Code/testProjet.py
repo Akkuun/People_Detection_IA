@@ -4,7 +4,7 @@ import numpy as np
 import sys
 import logging
 
-from Mugshot.CaptureFace import CaptureFace
+from Utility.CaptureFace import CaptureFace
 
 # Supprimer les logs verbeux de YOLO et ultralytics
 logging.getLogger('ultralytics').setLevel(logging.WARNING)
@@ -151,10 +151,12 @@ try:
                                 
                                 face = mugshot_generator.extract_face_from_detection(frame, bbox)
                                 if face is not None:
-                                    mugshot = mugshot_generator.create_mugshot(face)
+                                    mugshot, orientation = mugshot_generator.create_mugshot(face, enhance="none")
                                     if mugshot is not None:
-                                        cv2.imwrite(f'SavedImages/mugshot_manual_{frame_count}_person{i}.jpg', mugshot)
+                                        filename = f'SavedImages/mugshot_{orientation}_{frame_count}_person{i}.jpg'
+                                        cv2.imwrite(filename, mugshot)
                                         mugshot_count += 1
+                                        print(f"  📸 {orientation}: {filename}")
                         
                         if mugshot_count > 0:
                             print(f"👤 {mugshot_count} mugshot(s) généré(s)")

@@ -51,3 +51,5 @@ Thumbs.db
 SavedImages/
 
 */__pycache__/
+
+Code/__pycache__

@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+from .EnhanceImageQuality import EnhanceImageQuality
 
 resolution = (125, 125)
 
@@ -8,6 +9,10 @@ class CaptureFace:
         # Détecteurs de visage multiples pour améliorer la détection
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
         self.profile_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_profileface.xml')
+        self.eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
+        
+        # Pipeline d'amélioration
+        self.enhancer = EnhanceImageQuality()
         
         # Paramètres de détection plus flexibles
         self.detection_params = [
@@ -70,12 +75,61 @@ class CaptureFace:
         face = person_roi[fy:fy+fh, fx:fx+fw]
         return face
     
-    def create_mugshot(self, face_img, size=resolution):
-        """Créer un mugshot : juste le visage redimensionné sans bordures"""
+    def classify_orientation(self, face_img):
+        """Classifier si c'est face ou profil"""
         if face_img is None:
-            return None
+            return "unknown"
+            
+        gray = cv2.cvtColor(face_img, cv2.COLOR_BGR2GRAY)
+        
+        # Détecter les yeux pour déterminer l'orientation
+        eyes = self.eye_cascade.detectMultiScale(gray, 1.1, 3, minSize=(10, 10))
+        
+        if len(eyes) >= 2:
+            return "face"  # Deux yeux visibles = face
+        elif len(eyes) == 1:
+            return "profile"  # Un œil visible = profil
+        else:
+            # Fallback: analyser la symétrie de l'image
+            left_half = gray[:, :gray.shape[1]//2]
+            right_half = cv2.flip(gray[:, gray.shape[1]//2:], 1)
+            
+            # Redimensionner pour comparer
+            if left_half.shape != right_half.shape:
+                min_width = min(left_half.shape[1], right_half.shape[1])
+                left_half = left_half[:, :min_width]
+                right_half = right_half[:, :min_width]
+            
+            # Calculer la différence
+            diff = cv2.absdiff(left_half, right_half)
+            symmetry_score = np.mean(diff)
+            
+            return "face" if symmetry_score < 30 else "profile"
+    
+    def create_mugshot(self, face_img, size=resolution, enhance="minimal"):
+        """Créer un mugshot avec options d'amélioration
+        
+        Args:
+            enhance: "none", "minimal", "normal", True (=normal)
+        """
+        if face_img is None:
+            return None, "unknown"
             
         # Redimensionner le visage à la taille demandée
         face_resized = cv2.resize(face_img, size)
         
-        return face_resized
+        # Classifier l'orientation
+        orientation = self.classify_orientation(face_resized)
+        
+        # Améliorer la qualité selon l'option choisie
+        if enhance == "none" or enhance == False:
+            return face_resized, orientation
+        elif enhance == "minimal":
+            face_enhanced = self.enhancer.enhance_face_minimal(face_resized)
+            return face_enhanced, orientation
+        elif enhance == "normal" or enhance == True:
+            face_enhanced = self.enhancer.enhance_face(face_resized)
+            return face_enhanced, orientation
+        else:
+            # Par défaut, pas d'amélioration
+            return face_resized, orientation
