@@ -22,6 +22,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+Code/__pycache__/
 
 # Fichiers de données
 *.csv
@@ -40,9 +41,19 @@ __pycache__/
 
 # Environnements virtuels Python
 venv/
+envTest/
 .env/
 .envrc
 
 # Fichiers système
 .DS_Store
 Thumbs.db
+
+
+*/__pycache__/
+
+Code/__pycache__
+
+*.jpg
+*.jpeg
+*.png
