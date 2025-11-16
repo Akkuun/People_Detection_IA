@@ -41,6 +41,7 @@ Code/__pycache__/
 
 # Environnements virtuels Python
 venv/
+envTest/
 .env/
 .envrc
 
