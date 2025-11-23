@@ -64,15 +64,14 @@ source "$VENV_DIR/bin/activate"
 print_info "Mise à jour de pip..."
 pip install --upgrade pip
 
-# Installer les dépendances
+# Installer les dépendances uniquement via requirements.txt
 if [ -f "$CODE_DIR/requirements.txt" ]; then
     print_info "Installation des dépendances depuis requirements.txt..."
     pip install -r "$CODE_DIR/requirements.txt"
     print_success "Dépendances installées avec succès"
 else
-    print_warning "Fichier requirements.txt non trouvé dans $CODE_DIR"
-    print_info "Installation manuelle des dépendances principales..."
-    pip install ultralytics opencv-python
+    print_error "Fichier requirements.txt non trouvé dans $CODE_DIR. Veuillez le créer et lister toutes les dépendances nécessaires."
+    exit 1
 fi
 
 # Vérifier que le modèle YOLO existe
@@ -80,18 +79,20 @@ if [ ! -f "$CODE_DIR/yolov8n.pt" ]; then
     print_warning "Modèle yolov8n.pt non trouvé. Le téléchargement se fera automatiquement au premier lancement."
 fi
 
+# Vérifier les librairies système Qt nécessaires (pour Linux)
+if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    print_info "Vérification des librairies Qt système..."
+    if ! ldconfig -p | grep -q libxcb; then
+        print_warning "libxcb non trouvée. Installez-la avec : sudo pacman -Syu qt5-base qt5-xcb-private-headers libxcb"
+    fi
+fi
+
 # Configurer l'environnement d'affichage pour éviter les problèmes Qt
 export QT_QPA_PLATFORM=xcb
 export DISPLAY=${DISPLAY:-:0}
 
 # Lancer le script principal avec le nouveau pipeline
-print_info "Nouveau pipeline de mugshots activé :"
-print_info "  - Détection automatique de l'orientation (face/profil)"
-print_info "  - Amélioration de la qualité d'image"
-print_info "  - Génération de vues frontales à partir de profils"
-echo ""
-
+print_info "Lancement de l'interface graphique (UX) :"
 cd "$CODE_DIR"
-python3 testProjet.py
-
+python3 gui_main.py
 print_success "Projet terminé avec succès"
