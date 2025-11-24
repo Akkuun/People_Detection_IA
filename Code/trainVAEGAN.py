@@ -156,16 +156,16 @@ CONFIG = {
     'lr_G': 2e-4,
     'lr_D': 5e-5,          # lr réduit pour DA/DB
     'beta1': 0.5,
-    'num_epochs': 10,
+    'num_epochs': 40,  # ↑ Plus long pour meilleure convergence
     'device': torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
     'save_dir': 'checkpoints_vaegan',
     # VAE-GAN specific weights (AUTO-TUNED!)
-    'recon_weight': 20.0,  # ↑ Augmenté pour meilleure reconstruction
-    'kl_weight': 0.008,    # ↓ Réduit pour stabilité
+    'recon_weight': 12.0,  # ↓ Réduit (moins flou, plus de détails)
+    'kl_weight': 0.01,     # Normal (bonne variété)
     'kl_warmup_epochs': 5,
-    'perceptual_weight': 1.3,  # ↑ Un peu plus élevé
+    'perceptual_weight': 2.0,  # ↑ Augmenté (meilleure qualité visuelle)
     'ema_decay': 0.99999,
-    'adv_weight': 0.15,    # ↓ Réduit pour stabilité GAN
+    'adv_weight': 0.2,     # ↑ Un peu plus élevé (GAN plus compétitif = plus net)
     # Auto-tuning parameters
     'auto_tune': True,           # ← Activer l'auto-tuning
     'auto_tune_start_epoch': 2,  # ← Commencer à epoch 2
