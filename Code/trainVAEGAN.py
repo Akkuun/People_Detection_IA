@@ -1,9 +1,11 @@
-# train.py (VAE-GAN version)
+# train.py (VAE-GAN version with AUTO-TUNING)
 import os
 import time
 import random
 from pathlib import Path
 from tqdm import tqdm
+from collections import deque
+import json
 
 import torch
 import torch.nn as nn
@@ -16,6 +18,132 @@ import shutil
 from vae_generator import VAEGenerator
 from model import PatchDiscriminator, init_weights, ReplayBuffer
 from dataset import UnpairedCelebA_ONOT
+
+# -------------------------
+# AUTO-TUNING SYSTEM (Classe légère intégrée)
+# -------------------------
+class WeightAutoTuner:
+    """Auto-ajuste les poids en analysant l'historique de loss"""
+    
+    def __init__(self, initial_config, strategy='smart', history_size=10):
+        self.strategy = strategy
+        self.history = deque(maxlen=history_size)
+        self.weights = {
+            'recon_weight': initial_config.get('recon_weight', 10.0),
+            'perceptual_weight': initial_config.get('perceptual_weight', 1.0),
+            'adv_weight': initial_config.get('adv_weight', 0.25),
+            'kl_weight': initial_config.get('kl_weight', 0.01),
+        }
+        # Bounds pour éviter les extrêmes
+        self.bounds = {
+            'recon_weight': (0.1, 50.0),
+            'perceptual_weight': (0.01, 5.0),
+            'adv_weight': (0.01, 2.0),
+            'kl_weight': (0.0001, 0.1),
+        }
+    
+    def record_loss(self, total_loss):
+        """Enregistrer la loss"""
+        self.history.append(float(total_loss))
+    
+    def suggest_weights(self, epoch):
+        """Suggérer une modification des poids basée sur la loss history"""
+        if len(self.history) < 2:
+            return self.weights
+        
+        recent_losses = list(self.history)
+        avg_loss = sum(recent_losses) / len(recent_losses)
+        
+        if self.strategy == 'smart':
+            return self._smart_tuning(recent_losses, avg_loss)
+        elif self.strategy == 'conservative':
+            return self._conservative_tuning(recent_losses, avg_loss)
+        elif self.strategy == 'aggressive':
+            return self._aggressive_tuning(recent_losses, avg_loss)
+        else:
+            return self.weights
+    
+    def _smart_tuning(self, losses, avg_loss):
+        """Ajustements intelligents basés sur tendance"""
+        if len(losses) < 3:
+            return self.weights
+        
+        # Analyser la tendance
+        recent = losses[-3:]
+        trend = (recent[-1] - recent[0]) / (avg_loss + 1e-8)
+        volatility = (max(recent) - min(recent)) / (avg_loss + 1e-8)
+        
+        new_weights = self.weights.copy()
+        
+        # Si loss augmente = adversarial trop fort
+        if trend > 0.02:  # Loss augmente
+            new_weights['adv_weight'] *= 0.97
+            new_weights['recon_weight'] *= 1.02
+        
+        # Si loss diminue bien = peut augmenter adversarial
+        elif trend < -0.05:  # Loss diminue bien
+            new_weights['adv_weight'] *= 1.03
+            new_weights['perceptual_weight'] *= 1.02
+        
+        # Si très volatil = réduire adversarial
+        if volatility > 0.1:
+            new_weights['adv_weight'] *= 0.98
+        
+        # Apply bounds
+        for key in new_weights:
+            min_val, max_val = self.bounds[key]
+            new_weights[key] = max(min_val, min(max_val, new_weights[key]))
+        
+        self.weights = new_weights
+        return self.weights
+    
+    def _conservative_tuning(self, losses, avg_loss):
+        """Très stable, petits changements (pour mugshots)"""
+        if len(losses) < 3:
+            return self.weights
+        
+        recent = losses[-3:]
+        trend = (recent[-1] - recent[0]) / (avg_loss + 1e-8)
+        
+        new_weights = self.weights.copy()
+        
+        # Changements minimes
+        if trend > 0.01:
+            new_weights['adv_weight'] *= 0.99
+        elif trend < -0.03:
+            new_weights['adv_weight'] *= 1.01
+        
+        for key in new_weights:
+            min_val, max_val = self.bounds[key]
+            new_weights[key] = max(min_val, min(max_val, new_weights[key]))
+        
+        self.weights = new_weights
+        return self.weights
+    
+    def _aggressive_tuning(self, losses, avg_loss):
+        """Changements importants pour styles"""
+        if len(losses) < 3:
+            return self.weights
+        
+        recent = losses[-3:]
+        trend = (recent[-1] - recent[0]) / (avg_loss + 1e-8)
+        volatility = (max(recent) - min(recent)) / (avg_loss + 1e-8)
+        
+        new_weights = self.weights.copy()
+        
+        if trend > 0.03:
+            new_weights['adv_weight'] *= 0.95
+            new_weights['recon_weight'] *= 1.05
+        elif trend < -0.08:
+            new_weights['adv_weight'] *= 1.06
+            new_weights['perceptual_weight'] *= 1.05
+        
+        for key in new_weights:
+            min_val, max_val = self.bounds[key]
+            new_weights[key] = max(min_val, min(max_val, new_weights[key]))
+        
+        self.weights = new_weights
+        return self.weights
 
 # -------------------------
 # Config
@@ -31,13 +159,17 @@ CONFIG = {
     'num_epochs': 10,
     'device': torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
     'save_dir': 'checkpoints_vaegan',
-    # VAE-GAN specific weights (tweakables)
-    'recon_weight': 10.0,
-    'kl_weight': 0.01,
+    # VAE-GAN specific weights (AUTO-TUNED!)
+    'recon_weight': 20.0,  # ↑ Augmenté pour meilleure reconstruction
+    'kl_weight': 0.008,    # ↓ Réduit pour stabilité
     'kl_warmup_epochs': 5,
-    'perceptual_weight': 1.0,
+    'perceptual_weight': 1.3,  # ↑ Un peu plus élevé
     'ema_decay': 0.99999,
-    'adv_weight': 0.25,
+    'adv_weight': 0.15,    # ↓ Réduit pour stabilité GAN
+    # Auto-tuning parameters
+    'auto_tune': True,           # ← Activer l'auto-tuning
+    'auto_tune_start_epoch': 2,  # ← Commencer à epoch 2
+    'auto_tune_strategy': 'smart',  # 'smart', 'conservative', 'aggressive'
     # (général)
     'display_freq': 200,
     'max_images': 10000
@@ -47,6 +179,16 @@ os.makedirs('samples_vaegan', exist_ok=True)
 
 device = CONFIG['device']
 print(f"🚀 Using device: {device}")
+
+# ========================
+# INITIALISER AUTO-TUNER
+# ========================
+auto_tuner = WeightAutoTuner(
+    CONFIG,
+    strategy=CONFIG.get('auto_tune_strategy', 'smart'),
+    history_size=10
+)
+print(f"🤖 Auto-tuning: {CONFIG.get('auto_tune', True)} (strategy: {CONFIG.get('auto_tune_strategy', 'smart')})")
 
 
 def _has_enough_space(path: Path, min_bytes: int = 200 * 1024 * 1024) -> bool:
@@ -225,7 +367,23 @@ print(f"🎓 Starting training for {CONFIG['num_epochs']} epochs...\n")
 
 for epoch in range(1, CONFIG['num_epochs'] + 1):
     epoch_start = time.time()
+    
+    # ========================
+    # APPLIQUER AUTO-TUNING (après epoch 2)
+    # ========================
+    if CONFIG.get('auto_tune', False) and epoch >= CONFIG.get('auto_tune_start_epoch', 2):
+        auto_tuner.suggest_weights(epoch)
+        CONFIG['recon_weight'] = auto_tuner.weights['recon_weight']
+        CONFIG['perceptual_weight'] = auto_tuner.weights['perceptual_weight']
+        CONFIG['adv_weight'] = auto_tuner.weights['adv_weight']
+        CONFIG['kl_weight'] = auto_tuner.weights['kl_weight']
+        print(f"\n🔧 Weights adjusted (epoch {epoch}):")
+        print(f"   recon={CONFIG['recon_weight']:.3f}, perceptual={CONFIG['perceptual_weight']:.3f}, " +
+              f"adv={CONFIG['adv_weight']:.3f}, kl={CONFIG['kl_weight']:.5f}")
+    
     pbar = tqdm(loader, desc=f"Epoch {epoch}/{CONFIG['num_epochs']}")
+    epoch_losses = []
+    
     for i, (real_A, real_B) in enumerate(pbar):
         real_A = real_A.to(device)
         real_B = real_B.to(device)
@@ -342,6 +500,9 @@ for epoch in range(1, CONFIG['num_epochs'] + 1):
         # ------------------
         # Logging (affiche loss brutes)
         # ------------------
+        total_loss = float((loss_G + loss_DA + loss_DB).item())
+        epoch_losses.append(total_loss)
+        
         pbar.set_postfix({
             'loss_G_recon': float(loss_G_recon.item()),
             'loss_G_kl': float(loss_G_kl.item()),
@@ -354,6 +515,13 @@ for epoch in range(1, CONFIG['num_epochs'] + 1):
     scheduler_G.step()
     scheduler_DA.step()
     scheduler_DB.step()
+    
+    # ========================
+    # ENREGISTRER LOSS MOYENNE POUR AUTO-TUNING
+    # ========================
+    if epoch_losses and CONFIG.get('auto_tune', False):
+        avg_epoch_loss = sum(epoch_losses) / len(epoch_losses)
+        auto_tuner.record_loss(avg_epoch_loss)
 
     # Save checkpoint
     ckpt = {
