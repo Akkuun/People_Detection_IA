@@ -57,3 +57,6 @@ Code/__pycache__
 *.jpg
 *.jpeg
 *.png
+
+samples_vaegan
+*.pth

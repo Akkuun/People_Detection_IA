@@ -1,2 +1,6 @@
 ultralytics
 opencv-python
+torch
+torchvision
+tqdm
+Pillow
