@@ -128,18 +128,13 @@ class MugshotPipeline:
         """Pipeline complet de traitement"""
         if face_img is None:
             return None, "unknown"
-            
-        processed = face_img.copy()
+        # Redimensionner à 128x128 avant tout traitement
+        processed = cv2.resize(face_img, (128, 128))
         orientation = self.classify_orientation(processed)
-        
-        # 1. Amélioration qualité
         processed = self.enhancer.enhance_face(processed)
-        
-        # 2. Génération vue frontale si profil
+        # Génération vue frontale si profil
         if orientation == "profile":
             processed, orientation = self.generator.enhance_frontal_generation(processed, orientation)
-        else:
-            # 3. Normalisation de la taille pour les vues frontales
-            processed = self.generator.normalize_mugshot_size(processed, (200, 240))
-            
+        # Toujours normaliser la taille à 128x128 à la fin
+        processed = cv2.resize(processed, (128, 128))
         return processed, orientation
