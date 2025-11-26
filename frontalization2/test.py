@@ -41,7 +41,7 @@ def frontalize(model, datapath, mtest):
 
 # Load a pre-trained Pytorch model (mettre ici le model entrainé ) depuis le dossier "pretrained"
 torch.serialization.add_safe_globals([network.G])
-saved_model = torch.load("pretrained/generator_v0.pt", weights_only=False, map_location=torch.device('cpu'))
+saved_model = torch.load("output/netG_99.pt", weights_only=False, map_location=torch.device('cpu'))
 
 frontalize(saved_model, datapath, 3)
 

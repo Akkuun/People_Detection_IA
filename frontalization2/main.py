@@ -178,9 +178,9 @@ os.makedirs('output', exist_ok=True)
 # ========================
 start_time = time.time()
 
-print(f"\n🎓 Starting training for 30 epochs...\n")
+print(f"\n🎓 Starting training for 100 epochs...\n")
 
-for epoch in range(30):
+for epoch in range(100):
     
     loss_L1_total = 0
     loss_L2_total = 0
@@ -244,7 +244,7 @@ for epoch in range(30):
     avg_L2 = loss_L2_total / batch_count
     avg_gan = loss_gan_total / batch_count
     
-    print(f'[{epoch+1:2d}/30] L1: {avg_L1:.7f} | L2: {avg_L2:.7f} | GAN: {avg_gan:.7f}')
+    print(f'[{epoch+1:2d}/100] L1: {avg_L1:.7f} | L2: {avg_L2:.7f} | GAN: {avg_gan:.7f}')
     
     # ========================
     # SAVE OUTPUTS
