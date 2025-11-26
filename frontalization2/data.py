@@ -47,7 +47,7 @@ class ExternalInputIterator(object):
 
         # Shuffle the (input, target) pairs if necessary: in practice, it is profiles and frontal_indices that get shuffled
         if random_shuffle:
-            ind = np.array(range(len(self.frontal_indices)))
+            ind = np.array(range(len(self.frontal_indices)), dtype=int)  # ← Convertir en int
             shuffle(ind)
             self.profiles = self.profiles[ind]
             self.frontal_indices = self.frontal_indices[ind]
