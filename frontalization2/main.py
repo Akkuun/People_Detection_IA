@@ -79,89 +79,71 @@ def load_landmarks(landmarks_file):
 # ========================
 # SIMPLE DATASET WITH POSE DETECTION
 # ========================
-class FrontalizationDataset(Dataset):
-    """Load and separate profile/frontal images using pose detection"""
-    
-    def __init__(self, datapath, image_size=128):
+
+class IdocMugshotDataset(Dataset):
+    """
+    Dataset pour le frontalization GAN basé sur iDoc Mugshots :
+    - profils dans side/side
+    - frontales dans front/front
+    """
+
+    def __init__(self, base_dir, image_size=128):
+        self.base_dir = base_dir
         self.image_size = image_size
-        self.datapath = datapath
-        celeba_dir = join(datapath, 'CelebA')
-        landmarks_file = join(datapath, 'list_landmarks_align_celeba.txt')
-        
-        print(f"📂 Loading from: {celeba_dir}")
-        print(f"📄 Loading landmarks from: {landmarks_file}")
-        
-        # Load landmarks
-        if not os.path.exists(landmarks_file):
-            raise FileNotFoundError(f"Landmarks file not found: {landmarks_file}")
-        
-        landmarks_dict = load_landmarks(landmarks_file)
-        print(f"✅ Loaded {len(landmarks_dict)} landmark annotations")
-        
-        # Get all images
-        all_images = sorted([f for f in listdir(celeba_dir) 
-                            if f.endswith(('.jpg', '.jpeg', '.png'))])
-        
-        # Separate into profiles and frontals based on pose
-        self.profiles = []
-        self.frontals = []
-        
-        for img_file in all_images:
-            if img_file not in landmarks_dict:
-                continue
-            
-            landmarks = landmarks_dict[img_file]
-            is_profile, ratio = detect_pose_from_landmarks(landmarks)
-            
-            if is_profile:
-                self.profiles.append(img_file)
-            else:
-                self.frontals.append(img_file)
-        
-        print(f"✅ Detected: {len(self.profiles)} profiles, {len(self.frontals)} frontals")
-        
-        if len(self.profiles) == 0 or len(self.frontals) == 0:
-            raise ValueError(f"Not enough images! Profiles: {len(self.profiles)}, Frontals: {len(self.frontals)}")
-        
-        # Transforms
+
+        # Charger listes de fichiers
+        self.front_dir = os.path.join(base_dir, "front/front")
+        self.side_dir  = os.path.join(base_dir, "side/side")
+
+        self.front_files = sorted(os.listdir(self.front_dir))
+        self.side_files  = sorted(os.listdir(self.side_dir))
+
+        # On garde uniquement les IDs présents dans les deux dossiers
+        self.common_ids = list(set(self.front_files).intersection(set(self.side_files)))
+
+        if len(self.common_ids) == 0:
+            raise RuntimeError("❌ Aucun ID présent à la fois dans front/front et side/side")
+
+        print(f"📦 Dataset iDoc Mugshots chargé : {len(self.common_ids)} échantillons")
+
+        # Transforms pour PyTorch
         self.transform = transforms.Compose([
             transforms.Resize((image_size, image_size)),
             transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))  # [-1, 1]
+            transforms.Normalize((0.5,0.5,0.5),(0.5,0.5,0.5))
         ])
-    
+
     def __len__(self):
-        return min(len(self.profiles), len(self.frontals))
-    
+        return len(self.common_ids)
+
     def __getitem__(self, idx):
+        img_id = self.common_ids[idx]
+
+        # Charger les images
+        front_path = os.path.join(self.front_dir, img_id)
+        side_path  = os.path.join(self.side_dir,  img_id)
+
         try:
-            # Load profile
-            profile_idx = idx % len(self.profiles)
-            profile_path = join(self.datapath, 'CelebA', self.profiles[profile_idx])
-            profile = Image.open(profile_path).convert('RGB')
-            profile = self.transform(profile)
-            
-            # Load frontal
-            frontal_idx = idx % len(self.frontals)
-            frontal_path = join(self.datapath, 'CelebA', self.frontals[frontal_idx])
-            frontal = Image.open(frontal_path).convert('RGB')
-            frontal = self.transform(frontal)
-            
-            return profile, frontal
+            front_img = Image.open(front_path).convert("RGB")
+            side_img  = Image.open(side_path).convert("RGB")
         except Exception as e:
-            print(f"⚠️ Error loading index {idx}: {e}")
-            return self.__getitem__((idx - 1) % len(self))
+            print("⚠️ Erreur sur", img_id, ":", e)
+            # remplacer par un autre index
+            return self.__getitem__((idx+1) % len(self))
+
+        return self.transform(side_img), self.transform(front_img)
+        #          profil -----------------------  face frontale
 
 # ========================
 # CONFIG
 # ========================
-datapath = 'training_set'
+datapath = 'training_set/archive'
 gpu_id = 0
 device = torch.device("cuda", gpu_id) if torch.cuda.is_available() else torch.device("cpu")
 print(f"🚀 Using device: {device}")
 
 # Dataset & DataLoader
-dataset = FrontalizationDataset(datapath, image_size=128)
+dataset = IdocMugshotDataset(datapath, image_size=128)
 train_loader = DataLoader(dataset, batch_size=30, shuffle=True, num_workers=4, pin_memory=True)
 m_train = len(dataset)
 

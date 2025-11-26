@@ -57,3 +57,5 @@ Code/__pycache__
 *.jpg
 *.jpeg
 *.png
+
+/training_set/archive/
