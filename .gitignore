@@ -59,3 +59,5 @@ Code/__pycache__
 *.png
 
 /frontalization2/training_set/
+samples_vaegan
+*.pth

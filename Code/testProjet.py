@@ -1,3 +1,6 @@
+import os
+os.environ['QT_QPA_PLATFORM'] = 'xcb'  # Force X11 instead of Wayland
+
 from ultralytics import YOLO
 import cv2
 import numpy as np
@@ -7,6 +10,8 @@ import time
 
 from Utility.CaptureFace import CaptureFace
 from Utility.MugshotPipeline import MugshotPipeline
+from inference_cyclegan import CycleGANInference
+from inference_vaegan import VAEGANInference
 
 # Supprimer les logs verbeux de YOLO et ultralytics
 logging.getLogger('ultralytics').setLevel(logging.WARNING)
@@ -92,10 +97,18 @@ print("   - Appuyez sur 'q' ou 'ESC' pour quitter")
 print("   - Appuyez sur 's' pour capturer une image")
 print("   - Appuyez sur 'm' pour générer les mugshots")
 print("   - Appuyez sur 'c' pour détecter et classifier les visages")
+print("   - Appuyez sur 'y' pour styliser l'image avec le style du dataset")
+print("   - Appuyez sur '1' pour utiliser CycleGAN (256x256)")
+print("   - Appuyez sur '2' pour utiliser VAE-GAN (128x128)")
 
 frame_count = 0
 mugshot_generator = CaptureFace()
 mugshot_pipeline = MugshotPipeline()
+cyclegan_inference = CycleGANInference(image_size=256)
+vaegan_inference = VAEGANInference(image_size=128)
+
+# Modèle par défaut pour le style transfer
+current_style_model = 'cyclegan'  # ou 'vaegan'
 
 try:
     while True:
@@ -222,7 +235,68 @@ try:
                     print(" Aucune détection disponible")
             else:
                 print(" Aucun résultat de détection disponible")
-
+        # si touche == 1, on bascule vers CycleGAN
+        elif key == ord('1'):
+            current_style_model = 'cyclegan'
+            print("🔄 Passage au modèle CycleGAN (256x256)")
+        # si touche == 2, on bascule vers VAE-GAN
+        elif key == ord('2'):
+            current_style_model = 'vaegan'
+            print("🔄 Passage au modèle VAE-GAN (128x128)")
+        # si touche == Y, on applique le style transfer
+        elif key == ord('y'):
+            if current_style_model == 'cyclegan':
+                style_model = cyclegan_inference
+                model_name = "CycleGAN"
+            else:
+                style_model = vaegan_inference
+                model_name = "VAE-GAN"
+            
+            if style_model.G is None:
+                print(f"❌ Modèle {model_name} non chargé!")
+                print(f"   Solution: Entraînez le modèle avec: python3 train.py")
+                print(f"   Puis redémarrez l'app")
+            elif 'results' in locals() and results and len(results) > 0:
+                res = results[0]
+                boxes = getattr(res, "boxes", None)
+                
+                if boxes is not None:
+                    try:
+                        xyxy = boxes.xyxy.cpu().numpy() if hasattr(boxes.xyxy, "cpu") else np.array(boxes.xyxy)
+                        clss = boxes.cls.cpu().numpy() if hasattr(boxes.cls, "cpu") else np.array(boxes.cls)
+                        
+                        style_count = 0
+                        timestamp = int(time.time())
+                        
+                        for i, (box, cls) in enumerate(zip(xyxy, clss)):
+                            if int(cls) == 0:  # Personne détectée
+                                x1, y1, x2, y2 = map(int, box)
+                                bbox = (x1, y1, x2-x1, y2-y1)
+                                
+                                # Extraire le visage
+                                face = mugshot_generator.extract_face_from_detection(frame, bbox)
+                                if face is not None:
+                                    # Appliquer le style transfer (CycleGAN ou VAE-GAN)
+                                    styled_face = style_model.apply_style(face)
+                                    
+                                    if styled_face is not None:
+                                        filename = f'SavedImages/styled_{current_style_model}_{timestamp}_person{i}.jpg'
+                                        cv2.imwrite(filename, styled_face)
+                                        style_count += 1
+                                        print(f"  🎨 [{model_name}] Stylisé: {filename}")
+                        
+                        if style_count > 0:
+                            print(f"{style_count} visage(s) stylisé(s) avec {model_name}")
+                        else:
+                            print(" Aucune personne détectée pour styliser")
+                    except Exception as e:
+                        print(f"Erreur style transfer {model_name}: {e}")
+                        import traceback
+                        traceback.print_exc()
+                else:
+                    print(" Aucune détection disponible")
+            else:
+                print(" Aucun résultat de détection disponible")
 
 
 finally:
