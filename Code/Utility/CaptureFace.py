@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 from .EnhanceImageQuality import EnhanceImageQuality
 
-resolution = (125, 125)
+resolution = (128, 128)
 
 class CaptureFace:
     def __init__(self):
@@ -206,4 +206,11 @@ class CaptureFace:
 
         # Améliorer la qualité selon l'option choisie
         face_enhanced = self.enhancer.enhance_face(face_resized)
-        return face_enhanced, orientation
+        
+        # Convertir en RGB pour frontalization
+        if len(face_enhanced.shape) == 3 and face_enhanced.shape[2] == 3:
+            face_enhanced_rgb = cv2.cvtColor(face_enhanced, cv2.COLOR_BGR2RGB)
+        else:
+            face_enhanced_rgb = face_enhanced
+
+        return face_enhanced_rgb, orientation
