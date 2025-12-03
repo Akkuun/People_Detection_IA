@@ -6,9 +6,17 @@ from tkinter import Button, Label, Frame, filedialog, StringVar
 from PIL import Image, ImageTk
 import os
 import time
+import threading
+import subprocess
 from ultralytics import YOLO
 from Utility.CaptureFace import CaptureFace
 from Utility.MugshotPipeline import MugshotPipeline
+try:
+    from genMugshot import generate_frontal_from_image
+    GENMODEL_AVAILABLE = True
+except Exception as e:
+    print(f"Warning: genMugshot module not available: {e}")
+    GENMODEL_AVAILABLE = False
 
 color_grey = "#f4f4f4"
 color_preview = "#e9ecef"
@@ -164,6 +172,29 @@ class WebcamApp:
                                 path = os.path.join(self.save_folder, filename)
                                 cv2.imwrite(path, processed_face)
                                 mugshot_count += 1
+                                
+                                # Générer l'image frontale avec le modèle de genMugshot.py
+                                if GENMODEL_AVAILABLE:
+                                    def generate_frontal_async(img_array, save_path, orient):
+                                        try:
+                                            # Générer l'image frontale
+                                            frontal_img = generate_frontal_from_image(img_array)
+                                            if frontal_img is not None:
+                                                # Sauvegarder l'image frontale générée
+                                                frontal_path = save_path.replace('.jpg', '_frontal_generated.jpg')
+                                                cv2.imwrite(frontal_path, frontal_img)
+                                                print(f"Image frontale générée: {frontal_path}")
+                                        except Exception as e:
+                                            print(f"Error in frontal generation: {e}")
+                                    
+                                    # Lancer la génération dans un thread séparé pour ne pas bloquer l'UI
+                                    threading.Thread(
+                                        target=generate_frontal_async, 
+                                        args=(processed_face.copy(), path, orientation), 
+                                        daemon=True
+                                    ).start()
+                                else:
+                                    print("Frontal generation model not available")
                 if mugshot_count > 0:
                     self.info_label.config(text=f"{mugshot_count} mugshot(s) generated!")
                 else:
