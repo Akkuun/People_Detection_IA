@@ -4,6 +4,7 @@ import torch
 import torchvision.utils as vutils
 import torchvision.transforms as transforms
 import network
+import network_opetrova
 
 device = torch.device('cpu')
 
@@ -61,26 +62,86 @@ def frontalize(model, datapath, mtest):
     print("Saved output/test_fixed.jpg")
     return
 
-# Load model (adapter si nécessaire)
-# Add UNetGenerator to safe globals in case the checkpoint contains references
-try:
-    torch.serialization.add_safe_globals([network.UNetGenerator])
-except Exception:
-    # older torch versions may not have this API or may not need it
-    pass
+# Instantiate the generator matching the OPetrova-style checkpoint
+def load_model_from_checkpoint(model_cls, checkpoint_path: str, device=torch.device('cpu')):
+    """Load a model instance from checkpoint robustly.
 
-# Instantiate the correct generator matching the checkpoint saved during training
-model = network.UNetGenerator().to(device)
+    - accepts checkpoints that are plain state_dict or dict containing keys like
+      'state_dict', 'model_state_dict', 'G', 'generator', etc.
+    - strips common prefixes ('module.', 'netG.')
+    - filters tensors by matching shapes when needed
+    """
+    model = model_cls().to(device)
+    if not os.path.exists(checkpoint_path):
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
-# Try to load the state_dict using weights_only=True when available (safer),
-# otherwise fall back to the standard call.
-checkpoint_path = "output/netG_99.pt"
-try:
-    state = torch.load(checkpoint_path, map_location=device, weights_only=True)
-except TypeError:
-    # weights_only arg not supported in this torch version
-    state = torch.load(checkpoint_path, map_location=device)
+    loaded = torch.load(checkpoint_path, map_location=device)
 
-model.load_state_dict(state)
+    # unwrap common containers
+    state = None
+    if isinstance(loaded, dict):
+        # try common keys
+        for key in ('state_dict', 'model_state_dict', 'G', 'generator', 'netG', 'model'):
+            if key in loaded:
+                state = loaded[key]
+                break
+        if state is None:
+            # maybe the dict is already the state_dict
+            # heuristic: check if keys look like parameter names (contain '.')
+            if any('.' in k for k in loaded.keys()):
+                state = loaded
+            else:
+                # try to find a nested dict value that is a state_dict
+                for v in loaded.values():
+                    if isinstance(v, dict) and any('.' in k for k in v.keys()):
+                        state = v
+                        break
+    else:
+        # loaded could be a nn.Module instance saved directly
+        # or another object that exposes state_dict()
+        if hasattr(loaded, 'state_dict') and callable(getattr(loaded, 'state_dict')):
+            try:
+                state = loaded.state_dict()
+            except Exception:
+                # fallback: wrap as dict if possible
+                state = None
+        else:
+            state = None
+
+    if state is None:
+        raise RuntimeError('Could not find state_dict inside checkpoint')
+
+    # normalize keys: remove common prefixes
+    new_state = {}
+    for k, v in state.items():
+        new_k = k
+        if new_k.startswith('module.'):
+            new_k = new_k[len('module.'):]
+        if new_k.startswith('netG.'):
+            new_k = new_k[len('netG.'):]
+        new_state[new_k] = v
+
+    # attempt to load full state_dict
+    try:
+        model.load_state_dict(new_state)
+    except Exception as e:
+        print('Warning: full load failed:', e)
+        # filter compatible tensors
+        model_dict = model.state_dict()
+        filtered = {}
+        for k, v in new_state.items():
+            if k in model_dict and v.size() == model_dict[k].size():
+                filtered[k] = v
+        missing = [k for k in model_dict.keys() if k not in filtered]
+        unexpected = [k for k in new_state.keys() if k not in model_dict]
+        print(f"Filtered {len(filtered)} tensor(s) that match model. Missing keys: {len(missing)}. Unexpected keys: {len(unexpected)}")
+        model_dict.update(filtered)
+        model.load_state_dict(model_dict)
+
+    return model
+
+
+checkpoint_path = os.path.join(os.path.dirname(__file__), 'pretrained', 'generator_v0.pt')
+model = load_model_from_checkpoint(network_opetrova.Generator, checkpoint_path, device=device)
 model.eval()
 frontalize(model, 'test_set', 3)

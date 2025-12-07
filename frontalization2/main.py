@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 
 from network import G, D, weights_init, VAE, UNetGenerator
 from torchvision import models
+import argparse
 
 np.random.seed(42)
 torch.manual_seed(999)
@@ -37,9 +38,10 @@ class IdocMugshotDataset(Dataset):
     - frontales dans front/front
     """
 
-    def __init__(self, base_dir, image_size=128):
+    def __init__(self, base_dir, image_size=128, max_samples=None):
         self.base_dir = base_dir
         self.image_size = image_size
+        self.max_samples = max_samples
 
         # Charger listes de fichiers
         self.front_dir = os.path.join(base_dir, "front/front")
@@ -49,12 +51,21 @@ class IdocMugshotDataset(Dataset):
         self.side_files  = sorted(os.listdir(self.side_dir))
 
         # On garde uniquement les IDs présents dans les deux dossiers
-        self.common_ids = list(set(self.front_files).intersection(set(self.side_files)))
+        common = list(set(self.front_files).intersection(set(self.side_files)))
+
+        # If a max_samples limit is requested, sample deterministically
+        if isinstance(max_samples, int) and max_samples > 0 and max_samples < len(common):
+            rng = np.random.RandomState(42)
+            # choose without replacement and keep deterministic order
+            chosen = list(rng.choice(common, size=max_samples, replace=False))
+            self.common_ids = sorted(chosen)
+        else:
+            self.common_ids = sorted(common)
 
         if len(self.common_ids) == 0:
             raise RuntimeError("❌ Aucun ID présent à la fois dans front/front et side/side")
 
-        print(f"📦 Dataset iDoc Mugshots chargé : {len(self.common_ids)} échantillons")
+        print(f"📦 Dataset iDoc Mugshots chargé : {len(self.common_ids)} échantillons (max_samples={self.max_samples})")
 
         # Transforms de base : resize + to tensor + normalize
         self.resize_size = (image_size, image_size)
@@ -124,7 +135,7 @@ class IdocMugshotDataset(Dataset):
 # ========================
 # CONFIG
 # ========================
-num_epochs = 1  # Global parameter for the number of epochs
+num_epochs = 100  # Global parameter for the number of epochs
 save_every_epoch = True  # Set to True to save every epoch, False to save every 5 epochs
 
 datapath = 'training_set/archive'
@@ -133,10 +144,17 @@ device = torch.device("cuda", gpu_id) if torch.cuda.is_available() else torch.de
 print(f"🚀 Using device: {device}")
 
 # Dataset & DataLoader
+# Parse CLI arguments (allow using a dataset sample)
+parser = argparse.ArgumentParser(description='Face frontalization training')
+parser.add_argument('--max-samples', '--max_samples', dest='max_samples', type=int, default=None,
+                    help='Limit dataset to this many samples (deterministic sampling)')
+args = parser.parse_args()
+max_samples = args.max_samples
+
 m_train = None
-dataset = IdocMugshotDataset(datapath, image_size=128)
+dataset = IdocMugshotDataset(datapath, image_size=128, max_samples=max_samples)
 # Reduce batch size to avoid memory issues and improve stability
-train_loader = DataLoader(dataset, batch_size=16, shuffle=True, num_workers=2, pin_memory=True)
+train_loader = DataLoader(dataset, batch_size=16, shuffle=False, num_workers=2, pin_memory=True)
 m_train = len(dataset)
 m_train = len(dataset)
 

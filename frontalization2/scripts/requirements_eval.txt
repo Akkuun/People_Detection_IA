@@ -1,0 +1,5 @@
+lpips
+facenet-pytorch
+torchmetrics
+torchvision
+pytorch-fid
