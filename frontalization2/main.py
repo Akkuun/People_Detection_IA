@@ -13,13 +13,14 @@ from torchvision.transforms import functional as TF
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 import torchvision.utils as vutils
 import torchvision.transforms as transforms
 from torch.utils.data import Dataset, DataLoader
 import matplotlib.pyplot as plt
 
-from network import G, D, weights_init, VAE, UNetGenerator
+from network import G, D, weights_init, ConditionalUNetGenerator, ConditionalPatchGANDiscriminator, IdentityEncoder
 from torchvision import models
 import argparse
 
@@ -161,32 +162,37 @@ m_train = len(dataset)
 # ========================
 # MODELS
 # ========================
-# Use U-Net generator (skip connections) to better preserve details and reduce blurriness
-netG = UNetGenerator().to(device)
+# Utiliser le nouveau U-Net conditionnel avec encodeur d'identité
+netG = ConditionalUNetGenerator().to(device)
 netG.apply(weights_init)
 
-netD = D().to(device)
+# Utiliser le discriminateur conditionnel (Pix2Pix style)
+netD = ConditionalPatchGANDiscriminator().to(device)
 netD.apply(weights_init)
 
-netVAE = VAE(latent_dim=128).to(device)  # Initialize the VAE
-print("✅ Models initialized")
+# Identity encoder pour la loss d'identité (partagé avec le generator)
+identity_encoder = IdentityEncoder().to(device)
+identity_encoder.eval()  # Mode eval, pas d'entraînement
+for param in identity_encoder.parameters():
+    param.requires_grad = False
+
+print("✅ Models initialized (Conditional U-Net + Conditional PatchGAN + Identity Encoder)")
 
 # ========================
 # LOSS & OPTIMIZERS
 # ========================
-# Re-balance losses: reduce L1 to avoid over-smoothing and keep adversarial term
-# Loss weights
-L1_factor = 5.0
-L2_factor = 0.0
+# Poids des pertes (basés sur TP-GAN et la littérature)
 GAN_factor = 1.0
-# Perceptual loss weight (VGG features) - increase to give stronger perceptual guidance
-perc_factor = 5.0
+L1_factor = 10.0          # Augmenté pour structure de base
+perc_factor = 2.0         # Perceptual loss (VGG19)
+identity_factor = 1.0     # Identity loss (préservation identité)
+symmetry_factor = 0.1     # Symmetry loss (frontal doit être symétrique)
 
 # Diagnostics / loss options
 use_hinge = False  # set True to use hinge loss instead of BCEWithLogits
 log_every = 50
-# Number of generator steps per discriminator step (increase to give G more updates)
-G_steps_per_D = 3
+# Number of generator steps per discriminator step
+G_steps_per_D = 1  # Réduire à 1 pour meilleure stabilité
 
 # Small Gaussian noise added to inputs passed to D (helps regularize D)
 D_input_noise = 0.05
@@ -197,20 +203,19 @@ label_noise = 0.05
 criterion = nn.BCEWithLogitsLoss()
 real_label = 0.9
 
-# Optimizers: set lr_D smaller than lr_G for Test A (reduce D lr slightly)
-optimizerD = optim.Adam(netD.parameters(), lr=3e-5, betas=(0.5, 0.999))
+# Optimizers: équilibré pour le nouveau GAN conditionnel
+optimizerD = optim.Adam(netD.parameters(), lr=2e-4, betas=(0.5, 0.999))
 optimizerG = optim.Adam(netG.parameters(), lr=2e-4, betas=(0.5, 0.999), eps=1e-8)
-vae_criterion = nn.MSELoss()  # Loss for VAE
-vae_optimizer = optim.Adam(netVAE.parameters(), lr=0.0001, betas=(0.5, 0.999))
 
 # Create output directory
 os.makedirs('output', exist_ok=True)
 
-# ============ Perceptual VGG setup ===========
-# Load VGG features for perceptual loss
-vgg_features = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1).features[:16].to(device)
+# ============ VGG19 Perceptual Loss setup ===========
+# Utiliser VGG19 (plus profond que VGG16) pour la perceptual loss
+vgg_features = models.vgg19(weights=models.VGG19_Weights.IMAGENET1K_V1).features[:16].to(device)
 for p in vgg_features.parameters():
     p.requires_grad = False
+vgg_features.eval()
 
 def vgg_preprocess(x):
     # x in [-1,1] -> [0,1]
@@ -219,11 +224,30 @@ def vgg_preprocess(x):
     std = torch.tensor([0.229, 0.224, 0.225], device=x.device).view(1,3,1,1)
     return (x01 - mean) / std
 
-# function to compute perceptual loss between two image batches
 def perceptual_loss(a, b):
+    """Compute perceptual loss using VGG19 features"""
     fa = vgg_features(vgg_preprocess(a))
     fb = vgg_features(vgg_preprocess(b))
     return torch.mean((fa - fb) ** 2)
+
+def identity_loss(real, fake):
+    """Compute identity loss using ResNet18 features (cosine similarity)"""
+    with torch.no_grad():
+        feat_real = identity_encoder(real)
+        feat_fake = identity_encoder(fake)
+    # Cosine similarity loss (1 - similarity)
+    cos_sim = F.cosine_similarity(feat_real, feat_fake, dim=1).mean()
+    return 1.0 - cos_sim
+
+def symmetry_loss(img):
+    """Compute symmetry loss - frontal faces should be symmetric"""
+    # Split image in half and flip one side
+    h, w = img.shape[2], img.shape[3]
+    left_half = img[:, :, :, :w//2]
+    right_half = img[:, :, :, w//2:]
+    right_flipped = torch.flip(right_half, dims=[3])
+    # L1 distance between left and flipped right
+    return F.l1_loss(left_half, right_flipped)
 
 # ==============================================
 
@@ -236,7 +260,9 @@ print()
 
 # Initialize lists to store loss values
 loss_L1_history = []
-loss_L2_history = []
+loss_perc_history = []
+loss_identity_history = []
+loss_symmetry_history = []
 loss_gan_history = []
 loss_D_real_history = []
 loss_D_fake_history = []
@@ -244,7 +270,9 @@ loss_D_fake_history = []
 for epoch in range(num_epochs):
     
     loss_L1_total = 0
-    loss_L2_total = 0
+    loss_perc_total = 0
+    loss_identity_total = 0
+    loss_symmetry_total = 0
     loss_gan_total = 0
     batch_count = 0
     
@@ -253,18 +281,7 @@ for epoch in range(num_epochs):
         frontal = frontal.to(device)
 
         # ========================
-        # TRAIN VAE
-        # ========================
-        netVAE.zero_grad()
-        recon_profile, mu, logvar = netVAE(profile)
-        vae_loss_recon = vae_criterion(recon_profile, profile)
-        vae_loss_kl = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) / profile.size(0)
-        vae_loss = vae_loss_recon + vae_loss_kl
-        vae_loss.backward()
-        vae_optimizer.step()
-
-        # ========================
-        # TRAIN DISCRIMINATOR
+        # TRAIN DISCRIMINATOR (conditionnel)
         # ========================
         netD.zero_grad()
         
@@ -279,9 +296,9 @@ for epoch in range(num_epochs):
             frontal_for_D = frontal
             fake_for_D = generated.detach()
 
-        # Evaluate D on (possibly) noisy inputs
-        output_real = netD(frontal_for_D)
-        output_fake = netD(fake_for_D)
+        # Evaluate D on (possibly) noisy inputs - D conditionnel (profile, frontal)
+        output_real = netD(profile, frontal_for_D)
+        output_fake = netD(profile, fake_for_D)
 
         # Discriminator loss: hinge or BCEWithLogits with optional label noise
         if use_hinge:
@@ -311,14 +328,14 @@ for epoch in range(num_epochs):
         loss_D_fake_history.append(errD_fake.item())
 
         # ========================
-        # TRAIN GENERATOR (possibly multiple steps per D)
+        # TRAIN GENERATOR avec toutes les pertes
         # ========================
-        # We'll run G_steps_per_D times; accumulate metrics once per batch
-        first_step = True
         for g_step in range(G_steps_per_D):
             netG.zero_grad()
             generated_g = netG(profile)
-            output_gen = netD(generated_g)
+            
+            # GAN loss - avec D conditionnel
+            output_gen = netD(profile, generated_g)
 
             if use_hinge:
                 errG_GAN = -torch.mean(output_gen)
@@ -326,44 +343,64 @@ for epoch in range(num_epochs):
                 target_gen = torch.ones_like(output_gen).to(device) * real_label
                 errG_GAN = criterion(output_gen, target_gen)
 
-            errG_L1 = torch.mean(torch.abs(frontal - generated_g))
-            errG_L2 = torch.mean(torch.pow(frontal - generated_g, 2))
+            # L1 loss (reconstruction de base)
+            errG_L1 = F.l1_loss(generated_g, frontal)
 
+            # Perceptual loss (VGG19)
             try:
                 errG_perc = perceptual_loss(frontal, generated_g)
             except Exception:
                 errG_perc = torch.tensor(0.0, device=device)
 
-            errG = GAN_factor * errG_GAN + L1_factor * errG_L1 + L2_factor * errG_L2 + perc_factor * errG_perc
+            # Identity loss (préservation d'identité)
+            try:
+                errG_identity = identity_loss(frontal, generated_g)
+            except Exception:
+                errG_identity = torch.tensor(0.0, device=device)
 
-            # On first G step, accumulate values for logging/plots
-            if first_step:
+            # Symmetry loss (le frontal doit être symétrique)
+            try:
+                errG_symmetry = symmetry_loss(generated_g)
+            except Exception:
+                errG_symmetry = torch.tensor(0.0, device=device)
+
+            # Total generator loss
+            errG = (GAN_factor * errG_GAN + 
+                   L1_factor * errG_L1 + 
+                   perc_factor * errG_perc + 
+                   identity_factor * errG_identity + 
+                   symmetry_factor * errG_symmetry)
+
+            # Accumulate values for logging (first step only)
+            if g_step == 0:
                 loss_L1_total += errG_L1.item()
-                loss_L2_total += errG_L2.item()
+                loss_perc_total += errG_perc.item()
+                loss_identity_total += errG_identity.item()
+                loss_symmetry_total += errG_symmetry.item()
                 loss_gan_total += errG_GAN.item()
                 batch_count += 1
-                first_step = False
-
 
             errG.backward()
             optimizerG.step()
     
     # Log generator losses
     loss_L1_history.append(loss_L1_total / batch_count)
-    loss_L2_history.append(loss_L2_total / batch_count)
+    loss_perc_history.append(loss_perc_total / batch_count)
+    loss_identity_history.append(loss_identity_total / batch_count)
+    loss_symmetry_history.append(loss_symmetry_total / batch_count)
     loss_gan_history.append(loss_gan_total / batch_count)
     
     # ========================
     # EPOCH SUMMARY
     # ========================
-    # no per-epoch extra messages; only the summary line below will be printed
-    
     avg_L1 = loss_L1_total / batch_count
-    avg_L2 = loss_L2_total / batch_count
+    avg_perc = loss_perc_total / batch_count
+    avg_identity = loss_identity_total / batch_count
+    avg_symmetry = loss_symmetry_total / batch_count
     avg_gan = loss_gan_total / batch_count
 
-    # Print only the concise epoch summary line requested
-    print(f'[{epoch+1:2d}/{num_epochs}] L1: {avg_L1:.7f} | L2: {avg_L2:.7f} | GAN: {avg_gan:.7f}')
+    # Print summary avec toutes les pertes importantes
+    print(f'[{epoch+1:2d}/{num_epochs}] L1: {avg_L1:.5f} | Perc: {avg_perc:.5f} | ID: {avg_identity:.5f} | Sym: {avg_symmetry:.5f} | GAN: {avg_gan:.5f}')
     
     # ========================
     # SAVE OUTPUTS
@@ -386,31 +423,56 @@ for epoch in range(num_epochs):
 # ========================
 # PLOT LOSS CURVES
 # ========================
-plt.figure(figsize=(10, 6))
+plt.figure(figsize=(15, 10))
+
+# Subplot 1: Generator losses
+plt.subplot(2, 2, 1)
 plt.plot(loss_L1_history, label='L1 Loss')
-plt.plot(loss_L2_history, label='L2 Loss')
-plt.plot(loss_D_real_history, label='Discriminator Real Loss')
-plt.plot(loss_D_fake_history, label='Discriminator Fake Loss')
+plt.plot(loss_perc_history, label='Perceptual Loss')
+plt.plot(loss_identity_history, label='Identity Loss')
+plt.plot(loss_symmetry_history, label='Symmetry Loss')
 plt.xlabel('Epochs')
 plt.ylabel('Loss')
-plt.title('Training Loss Curves')
+plt.title('Generator Losses')
 plt.legend()
 plt.grid()
-plt.xlim([0, num_epochs])  # Set x-axis limit to the number of epochs
-plt.savefig('output/loss_curves.png')
-plt.show()
+plt.xlim([0, num_epochs])
 
-# Separate plot for GAN loss
-plt.figure(figsize=(10, 6))
+# Subplot 2: Discriminator losses
+plt.subplot(2, 2, 2)
+plt.plot(loss_D_real_history, label='Discriminator Real Loss', alpha=0.3)
+plt.plot(loss_D_fake_history, label='Discriminator Fake Loss', alpha=0.3)
+plt.xlabel('Batches')
+plt.ylabel('Loss')
+plt.title('Discriminator Losses')
+plt.legend()
+plt.grid()
+
+# Subplot 3: GAN loss
+plt.subplot(2, 2, 3)
 plt.plot(loss_gan_history, label='GAN Loss', color='orange')
 plt.xlabel('Epochs')
 plt.ylabel('Loss')
 plt.title('GAN Loss Curve')
 plt.legend()
 plt.grid()
-plt.xlim([0, num_epochs])  # Set x-axis limit to the number of epochs
-plt.ylim([0, 2]) 
-plt.savefig('output/gan_loss_curve.png')
+plt.xlim([0, num_epochs])
+
+# Subplot 4: Combined view
+plt.subplot(2, 2, 4)
+plt.plot(loss_L1_history, label='L1', alpha=0.7)
+plt.plot(loss_perc_history, label='Perceptual', alpha=0.7)
+plt.plot(loss_identity_history, label='Identity', alpha=0.7)
+plt.plot(loss_gan_history, label='GAN', alpha=0.7)
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.title('All Generator Losses Combined')
+plt.legend()
+plt.grid()
+plt.xlim([0, num_epochs])
+
+plt.tight_layout()
+plt.savefig('output/loss_curves.png')
 plt.show()
 
 total_time = time.time() - start_time
