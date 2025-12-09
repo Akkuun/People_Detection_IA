@@ -30,8 +30,8 @@ print_error() {
 }
 
 # Variables
-PROJECT_DIR="/home/mathis/Programming/People_Detection_IA"
-VENV_DIR="$PROJECT_DIR/venv"
+PROJECT_DIR="/home/paradox/Bureau/M2/ProjetImage"
+VENV_DIR="$PROJECT_DIR/Code/envTest"
 CODE_DIR="$PROJECT_DIR/Code"
 
 print_info "Démarrage du script de lancement du projet People Detection IA"

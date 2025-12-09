@@ -16,7 +16,7 @@ datapath = 'test_set'
 torch.serialization.add_safe_globals([network.G, network.UNetGenerator])
 # Utiliser le chemin absolu du script pour trouver le modèle
 script_dir = os.path.dirname(os.path.abspath(__file__))
-model_path = os.path.join(script_dir, "output", "netG_99.pt")
+model_path = os.path.join(script_dir, "output2", "netG_epoch100.pt")
 try:
     # Charger les poids
     state_dict = torch.load(model_path, weights_only=False, map_location=torch.device('cpu'))
