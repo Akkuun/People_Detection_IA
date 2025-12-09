@@ -12,10 +12,10 @@ from ultralytics import YOLO
 from Utility.CaptureFace import CaptureFace
 from Utility.MugshotPipeline import MugshotPipeline
 try:
-    from genMugshot import generate_frontal_from_image
+    from genMugshot_v2 import generate_frontal_from_image
     GENMODEL_AVAILABLE = True
 except Exception as e:
-    print(f"Warning: genMugshot module not available: {e}")
+    print(f"Warning: genMugshot_v2 module not available: {e}")
     GENMODEL_AVAILABLE = False
 
 color_grey = "#f4f4f4"

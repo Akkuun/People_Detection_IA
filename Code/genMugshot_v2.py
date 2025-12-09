@@ -33,10 +33,9 @@ print(f"🔧 Using device: {device}")
 # CONFIGURATION DU MODÈLE
 # ========================
 
-# IMPORTANT : Modifier ce chemin pour pointer vers ton nouveau modèle entraîné
-# Après entraînement, tu auras quelque chose comme :
-# /home/mathis/Programming/People_Detection_IA/frontalization2/output/netG_99.pt
-DEFAULT_MODEL_PATH = os.path.join(script_dir, "output", "netG_99.pt")
+# IMPORTANT : Chemin vers le nouveau modèle entraîné avec ConditionalUNetGenerator
+# Après entraînement avec frontalization2/main.py, le modèle sera ici :
+DEFAULT_MODEL_PATH = "/home/mathis/Programming/People_Detection_IA/frontalization2/output/netG_99.pt"
 
 # Variable globale pour le modèle chargé
 _loaded_model = None
