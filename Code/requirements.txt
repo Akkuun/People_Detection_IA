@@ -1,6 +1,8 @@
-ultralytics
-opencv-python
 torch
 torchvision
-tqdm
+numpy
+ultralytics
+opencv-python
 Pillow
+tqdm
+matplotlib

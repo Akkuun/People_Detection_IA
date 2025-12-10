@@ -29,10 +29,11 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Variables
-PROJECT_DIR="/home/mathis/Programming/People_Detection_IA"
-VENV_DIR="$PROJECT_DIR/venv"
+# Variables - Détecter automatiquement le répertoire du projet
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$SCRIPT_DIR"
 CODE_DIR="$PROJECT_DIR/Code"
+VENV_DIR="$CODE_DIR/envVirtual"
 
 print_info "Démarrage du script de lancement du projet People Detection IA"
 
@@ -50,7 +51,7 @@ cd "$PROJECT_DIR"
 # Vérifier si l'environnement virtuel existe déjà
 if [ ! -d "$VENV_DIR" ]; then
     print_info "Création de l'environnement virtuel Python..."
-    python3 -m venv venv
+    python3 -m venv "$VENV_DIR"
     print_success "Environnement virtuel créé avec succès"
 else
     print_info "Environnement virtuel existant trouvé"
@@ -82,14 +83,19 @@ fi
 # Vérifier les librairies système Qt nécessaires (pour Linux)
 if [[ "$OSTYPE" == "linux-gnu"* ]]; then
     print_info "Vérification des librairies Qt système..."
-    if ! ldconfig -p | grep -q libxcb; then
-        print_warning "libxcb non trouvée. Installez-la avec : sudo pacman -Syu qt5-base qt5-xcb-private-headers libxcb"
+    if ! ldconfig -p 2>/dev/null | grep -q libxcb; then
+        print_warning "libxcb non trouvée. Vous devrez peut-être l'installer :"
+        print_warning "  - Ubuntu/Debian: sudo apt install libxcb-xinerama0 python3-tk"
+        print_warning "  - Fedora/RHEL: sudo dnf install libxcb qt5-qtbase"
+        print_warning "  - Arch/Manjaro: sudo pacman -S qt5-base libxcb"
     fi
 fi
 
 # Configurer l'environnement d'affichage pour éviter les problèmes Qt
-export QT_QPA_PLATFORM=xcb
-export DISPLAY=${DISPLAY:-:0}
+if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    export QT_QPA_PLATFORM=${QT_QPA_PLATFORM:-xcb}
+    export DISPLAY=${DISPLAY:-:0}
+fi
 
 # Lancer le script principal avec le nouveau pipeline
 print_info "Lancement de l'interface graphique (UX) :"
